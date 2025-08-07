@@ -1,21 +1,22 @@
-version: 2
+version: 2.1
+
 jobs:
   test:
     docker:
-      - image: circleci/openjdk:17.0.16-jdk
+      - image: cimg/openjdk:17.0
     steps:
       - checkout
       - restore_cache:
-          key: hcsp-{{ checksum "pom.xml" }}
+          key: MyJourney2Pro-{{ checksum "pom.xml" }}
       - run:
           name: Run Maven verify
           command: mvn clean verify -PmavenCentral
-      - save_cache: # saves the project dependencies
+      - save_cache:
           paths:
             - ~/.m2
-          key: hcsp-{{ checksum "pom.xml" }}
+          key: MyJourney2Pro-{{ checksum "pom.xml" }}
+
 workflows:
-  version: 2
-  default:
+  build-and-test:
     jobs:
       - test
