@@ -41,29 +41,25 @@ public class Main {
     // 初始化数据库结构（如果不存在）
     private static void initSchema(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("""
-                    CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (
-                        link VARCHAR(255) PRIMARY KEY
-                    )
-                    """);
-            stmt.execute("""
-                    CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (
-                        link VARCHAR(255) PRIMARY KEY
-                    )
-                    """);
+            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (" +
+                    "LINK VARCHAR(1024) PRIMARY KEY" +
+                    ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (" +
+                    "LINK VARCHAR(1024) PRIMARY KEY" +
+                    ")");
         }
     }
 
-    // 如果数据库为空则插入初始数据
     private static void seedIfEmpty(Connection connection) throws SQLException {
-        try (Statement stmt = connection.createStatement()) {
-            ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM LINKS_TO_BE_PROCESSED");
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM LINKS_TO_BE_PROCESSED")) {
             rs.next();
             if (rs.getInt(1) == 0) {
-                stmt.executeUpdate("INSERT INTO LINKS_TO_BE_PROCESSED(link) VALUES ('http://sina.cn')");
+                stmt.executeUpdate("INSERT INTO LINKS_TO_BE_PROCESSED(LINK) VALUES ('http://sina.cn')");
             }
         }
     }
+
 
 
     public static void main(String[] args) throws IOException, SQLException {
