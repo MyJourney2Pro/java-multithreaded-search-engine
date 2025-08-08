@@ -26,7 +26,7 @@ public class Main {
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
 
-    private static List<String> loadUrlFromDatabase(Connection connection,String sql) throws SQLException {
+    private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
         List<String> result = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             ResultSet resultSet = statement.executeQuery();
@@ -84,7 +84,9 @@ public class Main {
             // 从new一个已处理的链接池变成从数据库加载已经处理的链接的代码
             Set<String> processedLinks = new HashSet<>(loadUrlFromDatabase(connection, "select link from LINKS_ALREADY_PROCESSED"));
 
-            if (linkPool.isEmpty()) linkPool.add(HOMEPAGE_HTTP);                   // 先把新浪首页压进去
+            if (linkPool.isEmpty()) {
+                linkPool.add(HOMEPAGE_HTTP);
+            } // 先把新浪首页压进去
 
 
             while (!linkPool.isEmpty()) {
