@@ -40,6 +40,12 @@
         </dependency>
 
         <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.21.1</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
             <version>5.13.4</version>
@@ -89,7 +95,6 @@
                             <artifactId>checkstyle</artifactId>
                             <version>8.29</version>
                         </dependency>
-
                     </dependencies>
                 </plugin>
         </plugins>
