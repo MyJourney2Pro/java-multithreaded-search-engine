@@ -65,12 +65,18 @@ public class Main {
 
 
     private static boolean shouldSkipLink(String link) {
-        if (!link.contains("sina.cn")) return true;
-        if (isLoginPage(link)) return true;
-
-        if (!isNewsPage(link) && !isHomepage(link)) return true; // <-- 修正
+        if (!link.contains("sina.cn")) {
+            return true;
+        }
+        if (isLoginPage(link)) {
+            return true;
+        }
+        if (!isNewsPage(link) && !isHomepage(link)) {
+            return true;
+        }
         return false;
     }
+
 
     private static Document fetchDocument(String link, boolean isCI) throws IOException {
         if (isCI) {
@@ -83,7 +89,9 @@ public class Main {
                 return Jsoup.parse(html);
             }
         } else {
-            if (link.startsWith("//")) link = "https:" + link;
+            if (link.startsWith("//")) {
+                link = "https:" + link;
+            }
             try (CloseableHttpClient httpclient = createDefault()) {
                 HttpGet httpGet = new HttpGet(link);
                 httpGet.addHeader("User-Agent", UA);
