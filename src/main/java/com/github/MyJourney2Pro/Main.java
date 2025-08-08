@@ -115,6 +115,7 @@ public class Main {
                 System.out.println(articleTag.child(0).text());
             }
         }
+
     }
     private static boolean isNewsPage(String link){
         return link.contains("new.sina.cn");
