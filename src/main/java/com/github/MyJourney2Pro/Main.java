@@ -41,14 +41,14 @@ public class Main {
     // 初始化数据库结构（如果不存在）
     private static void initSchema(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (" +
-                    "LINK VARCHAR(1024) PRIMARY KEY" +
-                    ")");
-            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (" +
-                    "LINK VARCHAR(1024) PRIMARY KEY" +
-                    ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (LINK VARCHAR(1024) PRIMARY KEY)");
+            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (LINK VARCHAR(1024) PRIMARY KEY)");
+            // ↓↓↓ 新增：把旧库里可能是 VARCHAR(100) 的列扩到 2048
+            try { stmt.execute("ALTER TABLE LINKS_TO_BE_PROCESSED ALTER COLUMN LINK VARCHAR(2048)"); } catch (SQLException ignore) {}
+            try { stmt.execute("ALTER TABLE LINKS_ALREADY_PROCESSED ALTER COLUMN LINK VARCHAR(2048)"); } catch (SQLException ignore) {}
         }
     }
+
 
     private static void seedIfEmpty(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement();
@@ -59,6 +59,56 @@ public class Main {
             }
         }
     }
+
+
+    private static String popOneLink(Connection connection) throws SQLException {
+        String link = null;
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT LINK FROM LINKS_TO_BE_PROCESSED LIMIT 1");
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) link = rs.getString(1);
+        }
+        if (link != null) {
+            try (PreparedStatement del = connection.prepareStatement(
+                    "DELETE FROM LINKS_TO_BE_PROCESSED WHERE LINK=?")) {
+                del.setString(1, link);
+                del.executeUpdate();
+            }
+        }
+        return link;
+    }
+
+    //判断是否已处理
+    private static boolean alreadyProcessed(Connection connection, String link) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT 1 FROM LINKS_ALREADY_PROCESSED WHERE LINK=?")) {
+            ps.setString(1, link);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+
+    // 标记已处理（避免重复插入）
+    private static void markProcessed(Connection connection, String link) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "MERGE INTO LINKS_ALREADY_PROCESSED KEY(LINK) VALUES (?)")) {
+            ps.setString(1, link);
+            ps.executeUpdate();
+        }
+    }
+
+    // 入队新链接（写入待处理表，去重）
+    private static void enqueue(Connection connection, String link) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "MERGE INTO LINKS_TO_BE_PROCESSED KEY(LINK) VALUES (?)")) {
+            ps.setString(1, link);
+            ps.executeUpdate();
+        }
+    }
+
+
 
 
 
@@ -76,23 +126,58 @@ public class Main {
             initSchema(connection);
             seedIfEmpty(connection);
 
-            // String url = "jdbc:h2:file:/Users/aliran/news";
-            // Connection connection = DriverManager.getConnection(url);
+            int maxPages = 30; // 防止失控
+            for (int i = 0; i < maxPages; i++) {
 
-            // 从new一个待处理的链接池变成从数据库加载待处理的链接的代码👉因为数据库能实现数据的持久化
-            List<String> linkPool = loadUrlFromDatabase(connection, "select link from LINKS_TO_BE_PROCESSED");
-            // 从new一个已处理的链接池变成从数据库加载已经处理的链接的代码
-            Set<String> processedLinks = new HashSet<>(loadUrlFromDatabase(connection, "select link from LINKS_ALREADY_PROCESSED"));
+                // FIX: 不再使用未定义的 linkPool；每次从数据库“弹出”一个
+                String link = popOneLink(connection);
+                if (link == null) break;
 
-            if (linkPool.isEmpty()) {
-                linkPool.add(HOMEPAGE_HTTP);
-            } // 先把新浪首页压进去
+                if (shouldSkipLink(link)) {
+                    markProcessed(connection, link);
+                    continue;
+                }
+                if (alreadyProcessed(connection, link)) {
+                    continue;
+                }
 
 
+
+/*
             while (!linkPool.isEmpty()) {
+                // 从new一个待处理的链接池变成从数据库加载待处理的链接的代码👉因为数据库能实现数据的持久化
+                List<String> linkPool = loadUrlFromDatabase(connection, "select link from LINKS_TO_BE_PROCESSED");
+                // 从new一个已处理的链接池变成从数据库加载已经处理的链接的代码
+                Set<String> processedLinks = new HashSet<>(loadUrlFromDatabase(connection, "select link from LINKS_ALREADY_PROCESSED"));
+
+                if (linkPool.isEmpty()) {
+                    linkPool.add(HOMEPAGE_HTTP);
+                } // 先把新浪首页压进去
+
+
                 // 这里变成每次处理完链接后要更新数据库
                 String link = linkPool.remove(linkPool.size() - 1);
-                if (processedLinks.contains(link)) {
+
+                // 从待处理池中捞一个来处理, 处理完就从池子里(包括内存和数据库)删除
+                try(PreparedStatement statement = connection.prepareStatement("DELETE FROM LINKS_TO_BE_PROCESSED where link = ?");
+                    statement.setString(1,link);
+                    statement.executeUpdate();
+                    }
+
+
+
+                // 询问数据库当前链接是不是已经被处理过了？
+                boolean processed = false;
+                try(PreparedStatement statement = connection.prepareStatement("SELECT LINK from LINKS_ALREADY_PROCESSED where link = ?");
+                    statement.setString(1,link);
+                    ResultSet resultSet = statement.executeQuery();
+                    while (resultSet.next()) {
+                    processed = true;
+                }
+                    if (processed){
+                        continue;
+
+                if(processedLinks.contains(link)) {
                     continue;
                 }
 
@@ -101,19 +186,28 @@ public class Main {
                     continue;
                 }
 
+            try(PreparedStatement statement = connection.prepareStatement("INSERT INTO LINKS_ALREADY_PROCESSED(link) values(?));
+                statement.setString(1,link);
+                statement.executeUpdate();
+                    }
+
+ */
                 Document doc = fetchDocument(link, isCI);
                 if (doc == null) { // ✅ 检查 doc
                     System.err.println("Document is null for link: " + link);
-                    processedLinks.add(link);
+                    markProcessed(connection, link);
                     continue;
                 }
 
-                parseAndPrintTitles(doc);
-                processedLinks.add(link);
+                // 打印并把页面中的链接写回待处理表
+                parseAndPrintTitles(doc, connection);
+
+                // 标记已处理
+                markProcessed(connection, link);
             }
         }
+        System.out.println("Done.");
     }
-
 
 
     private static boolean shouldSkipLink(String link) {
@@ -150,7 +244,8 @@ public class Main {
                 try (CloseableHttpResponse resp = httpclient.execute(httpGet)) {
                     HttpEntity entity = resp.getEntity();
                     String html = EntityUtils.toString(entity);
-                    return Jsoup.parse(html);
+                    // 传 baseUri，后面 absUrl 才能解析相对链接
+                    return Jsoup.parse(html, link);
                 }
             } catch (IOException e) {
                 System.err.println("访问失败: " + link);
@@ -160,17 +255,28 @@ public class Main {
     }
 
 
-    private static void parseAndPrintTitles(Document doc) {
-        Elements articleTags = doc.select("article");
-        for (Element articleTag : articleTags) {
-            if (!articleTag.children().isEmpty()) {
-                System.out.println(articleTag.child(0).text());
-            }
+    // 传入 Connection；打印标题；把 a[href] 的绝对链接入库
+    private static void parseAndPrintTitles(Document doc, Connection connection) throws SQLException {
+        System.out.println("[PAGE] " + doc.title());
+
+        Elements articleTags = doc.select("article h1, article h2, h1, h2");
+        int count = 0;
+        for (Element h : articleTags) {
+            if (count++ >= 10) break;
+            System.out.println("  - " + h.text());
         }
 
+        // 把页面中的链接加入待处理（限定域）
+        for (Element a : doc.select("a[href]")) {
+            String next = a.absUrl("href");
+            if (!shouldSkipLink(next)) {
+                enqueue(connection, next);
+            }
+        }
     }
+
     private static boolean isNewsPage(String link){
-        return link.contains("new.sina.cn");
+        return link.contains("new.sina.cn") || link.contains("news.sina.cn");
     }
 
     private static boolean isLoginPage(String link){
@@ -181,5 +287,4 @@ public class Main {
         return link.equals(HOMEPAGE_HTTP) || link.equals(HOMEPAGE_HTTPS);
     }
 }
-
 
