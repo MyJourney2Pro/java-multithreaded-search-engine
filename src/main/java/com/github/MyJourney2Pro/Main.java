@@ -26,7 +26,7 @@ public class Main {
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
 
-    private static List<String> getNextLink(Connection connection, String sql) throws SQLException {
+    private static String getNextLink(Connection connection, String sql) throws SQLException {
        ResultSet resultSet = null;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             resultSet = statement.executeQuery();
@@ -43,7 +43,7 @@ public class Main {
 
 
 
-    private static String getNextLinkThenDelete(Connection connection) {
+    private static String getNextLinkThenDelete(Connection connection)throws SQLException {
         String link = getNextLink(connection, "select link from LINKS_TO_BE_PROCESSED LIMIT 1");
         if (link != null) {
             UpdateDatabase(connection, link, "Delete from LINKS_TO_BE_PROCESSED where links = ?");
@@ -127,9 +127,22 @@ public class Main {
 
     private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException{
         try (PreparedStatement statement = connection.prepareStatement(sql)){
-            statement.setString(1,link);
+            statement.setString(1, link);
             statement.executeUpdate();
         }
+    }
+
+
+
+    private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
+        List<String> result = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                result.add(rs.getString(1));
+            }
+        }
+        return result;
     }
 
 
@@ -143,46 +156,41 @@ public class Main {
 
         try (Connection connection = DriverManager.getConnection(jdbcUrl, "root", "")) {
 
-            String link = null;
-
             // 确保表存在 & 初始数据
             initSchema(connection);
             seedIfEmpty(connection);
 
-            // String url = "jdbc:h2:file:/Users/aliran/news";
-            // Connection connection = DriverManager.getConnection(url);
+            while (true) {
+                // 从数据库取一个待处理链接
+                String link = popOneLink(connection);
 
-            // 从new一个待处理的链接池变成从数据库加载待处理的链接的代码👉因为数据库能实现数据的持久化
-            List<String> linkPool = loadUrlFromDatabase(connection, "select link from LINKS_TO_BE_PROCESSED");
-            // 从new一个已处理的链接池变成从数据库加载已经处理的链接的代码
-            Set<String> processedLinks = new HashSet<>(loadUrlFromDatabase(connection, "select link from LINKS_ALREADY_PROCESSED"));
+                if (link == null) {
+                    System.out.println("done");
+                    break;
+                }
 
-            if (linkPool.isEmpty()) {
-                linkPool.add(HOMEPAGE_HTTP);
-            } // 先把新浪首页压进去
-
-
-            while (!linkPool.isEmpty()) {
-                // 这里变成每次处理完链接后要更新数据库
-                String link = linkPool.remove(linkPool.size() - 1);
-                if (processedLinks.contains(link)) {
+                // 如果已经处理过就跳过
+                if (alreadyProcessed(connection, link)) {
                     continue;
                 }
 
                 if (shouldSkipLink(link)) {
-                    processedLinks.add(link);
+                    markProcessed(connection, link);
                     continue;
                 }
 
                 Document doc = fetchDocument(link, isCI);
-                if (doc == null) { // ✅ 检查 doc
+                if (doc == null) {
                     System.err.println("Document is null for link: " + link);
-                    processedLinks.add(link);
+                    markProcessed(connection, link);
                     continue;
                 }
 
                 parseAndPrintTitles(doc);
-                processedLinks.add(link);
+
+                // 标记当前链接已处理
+                markProcessed(connection, link);
+
             }
         }
     }
