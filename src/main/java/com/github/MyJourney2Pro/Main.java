@@ -19,34 +19,32 @@ import static org.apache.http.impl.client.HttpClients.createDefault;
 
 public class Main {
 
-
     private static final String HOMEPAGE_HTTP  = "http://sina.cn";
     private static final String HOMEPAGE_HTTPS = "https://sina.cn";
     private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
-
+    // ✅ 修复：该方法用途是取“一个”链接，所以返回类型改为 String
     private static String getNextLink(Connection connection, String sql) throws SQLException {
-       ResultSet resultSet = null;
+        ResultSet resultSet = null;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             resultSet = statement.executeQuery();
-            while (resultSet.next()) {
+            if (resultSet.next()) {
                 return resultSet.getString(1);
             }
-        }finally{
-            if (resultSet != null){
+        } finally {
+            if (resultSet != null) {
                 resultSet.close();
             }
         }
         return null;
     }
 
-
-
-    private static String getNextLinkThenDelete(Connection connection)throws SQLException {
+    private static String getNextLinkThenDelete(Connection connection) throws SQLException {
         String link = getNextLink(connection, "select link from LINKS_TO_BE_PROCESSED LIMIT 1");
         if (link != null) {
-            UpdateDatabase(connection, link, "Delete from LINKS_TO_BE_PROCESSED where links = ?");
+            // ✅ 修复：列名应为 LINK 而不是 links
+            UpdateDatabase(connection, link, "DELETE FROM LINKS_TO_BE_PROCESSED WHERE LINK = ?");
         }
         return link;
     }
@@ -72,7 +70,6 @@ public class Main {
             }
         }
     }
-
 
     private static String popOneLink(Connection connection) throws SQLException {
         String link = null;
@@ -104,7 +101,6 @@ public class Main {
         }
     }
 
-
     // 标记已处理（避免重复插入）
     private static void markProcessed(Connection connection, String link) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
@@ -123,17 +119,15 @@ public class Main {
         }
     }
 
-
-
-    private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException{
-        try (PreparedStatement statement = connection.prepareStatement(sql)){
+    private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, link);
             statement.executeUpdate();
         }
     }
 
-
-
+    // ✅ 补回你之前用到的工具方法：从数据库读一列结果到 List<String>
+    // 保留原签名，避免 “cannot find symbol loadUrlFromDatabase(...)”
     private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
         List<String> result = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(sql);
@@ -144,7 +138,6 @@ public class Main {
         }
         return result;
     }
-
 
     public static void main(String[] args) throws IOException, SQLException {
 
@@ -191,11 +184,13 @@ public class Main {
                 // 标记当前链接已处理
                 markProcessed(connection, link);
 
+                // 假设在这里解析到新链接并入队（示例）
+                // for (String newUrl : findNewLinks(doc)) {
+                //     enqueue(connection, newUrl);
+                // }
             }
         }
     }
-
-
 
     private static boolean shouldSkipLink(String link) {
         if (!link.contains("sina.cn")) {
@@ -209,7 +204,6 @@ public class Main {
         }
         return false;
     }
-
 
     private static Document fetchDocument(String link, boolean isCI) throws IOException {
         if (isCI) {
@@ -240,7 +234,6 @@ public class Main {
         }
     }
 
-
     private static void parseAndPrintTitles(Document doc) {
         Elements articleTags = doc.select("article");
         for (Element articleTag : articleTags) {
@@ -248,13 +241,13 @@ public class Main {
                 System.out.println(articleTag.child(0).text());
             }
         }
-
     }
-    private static boolean isNewsPage(String link){
+
+    private static boolean isNewsPage(String link) {
         return link.contains("new.sina.cn");
     }
 
-    private static boolean isLoginPage(String link){
+    private static boolean isLoginPage(String link) {
         return link.contains("password.sina.cn");
     }
 
@@ -262,5 +255,3 @@ public class Main {
         return link.equals(HOMEPAGE_HTTP) || link.equals(HOMEPAGE_HTTPS);
     }
 }
-
-
