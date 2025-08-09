@@ -26,17 +26,30 @@ public class Main {
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
 
-    private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
-        List<String> result = new ArrayList<>();
+    private static List<String> getNextLink(Connection connection, String sql) throws SQLException {
+       ResultSet resultSet = null;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            ResultSet resultSet = statement.executeQuery();
+            resultSet = statement.executeQuery();
             while (resultSet.next()) {
-                result.add(resultSet.getString(1));
+                return resultSet.getString(1);
+            }
+        }finally{
+            if (resultSet != null){
+                resultSet.close();
             }
         }
-        return result;
+        return null;
     }
 
+
+
+    private static String getNextLinkThenDelete(Connection connection) {
+        String link = getNextLink(connection, "select link from LINKS_TO_BE_PROCESSED LIMIT 1");
+        if (link != null) {
+            UpdateDatabase(connection, link, "Delete from LINKS_TO_BE_PROCESSED where links = ?");
+        }
+        return link;
+    }
 
     // 初始化数据库结构（如果不存在）
     private static void initSchema(Connection connection) throws SQLException {
@@ -61,6 +74,64 @@ public class Main {
     }
 
 
+    private static String popOneLink(Connection connection) throws SQLException {
+        String link = null;
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT LINK FROM LINKS_TO_BE_PROCESSED LIMIT 1");
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                link = rs.getString(1);
+            }
+        }
+        if (link != null) {
+            try (PreparedStatement del = connection.prepareStatement(
+                    "DELETE FROM LINKS_TO_BE_PROCESSED WHERE LINK=?")) {
+                del.setString(1, link);
+                del.executeUpdate();
+            }
+        }
+        return link;
+    }
+
+    //判断是否已处理
+    private static boolean alreadyProcessed(Connection connection, String link) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT 1 FROM LINKS_ALREADY_PROCESSED WHERE LINK=?")) {
+            ps.setString(1, link);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+
+    // 标记已处理（避免重复插入）
+    private static void markProcessed(Connection connection, String link) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "MERGE INTO LINKS_ALREADY_PROCESSED KEY(LINK) VALUES (?)")) {
+            ps.setString(1, link);
+            ps.executeUpdate();
+        }
+    }
+
+    // 入队新链接（写入待处理表，去重）
+    private static void enqueue(Connection connection, String link) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "MERGE INTO LINKS_TO_BE_PROCESSED KEY(LINK) VALUES (?)")) {
+            ps.setString(1, link);
+            ps.executeUpdate();
+        }
+    }
+
+
+
+    private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException{
+        try (PreparedStatement statement = connection.prepareStatement(sql)){
+            statement.setString(1,link);
+            statement.executeUpdate();
+        }
+    }
+
 
     public static void main(String[] args) throws IOException, SQLException {
 
@@ -71,6 +142,8 @@ public class Main {
                 : "jdbc:h2:file:./news;AUTO_SERVER=TRUE";
 
         try (Connection connection = DriverManager.getConnection(jdbcUrl, "root", "")) {
+
+            String link = null;
 
             // 确保表存在 & 初始数据
             initSchema(connection);
