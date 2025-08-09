@@ -19,32 +19,34 @@ import static org.apache.http.impl.client.HttpClients.createDefault;
 
 public class Main {
 
+
     private static final String HOMEPAGE_HTTP  = "http://sina.cn";
     private static final String HOMEPAGE_HTTPS = "https://sina.cn";
     private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
-    // ✅ 修复：该方法用途是取“一个”链接，所以返回类型改为 String
-    private static String getNextLink(Connection connection, String sql) throws SQLException {
+
+    private static List<String> getNextLink(Connection connection, String sql) throws SQLException {
         ResultSet resultSet = null;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             resultSet = statement.executeQuery();
-            if (resultSet.next()) {
+            while (resultSet.next()) {
                 return resultSet.getString(1);
             }
-        } finally {
-            if (resultSet != null) {
+        }finally{
+            if (resultSet != null){
                 resultSet.close();
             }
         }
         return null;
     }
 
-    private static String getNextLinkThenDelete(Connection connection) throws SQLException {
+
+
+    private static String getNextLinkThenDelete(Connection connection) {
         String link = getNextLink(connection, "select link from LINKS_TO_BE_PROCESSED LIMIT 1");
         if (link != null) {
-            // ✅ 修复：列名应为 LINK 而不是 links
-            UpdateDatabase(connection, link, "DELETE FROM LINKS_TO_BE_PROCESSED WHERE LINK = ?");
+            UpdateDatabase(connection, link, "Delete from LINKS_TO_BE_PROCESSED where links = ?");
         }
         return link;
     }
@@ -70,6 +72,7 @@ public class Main {
             }
         }
     }
+
 
     private static String popOneLink(Connection connection) throws SQLException {
         String link = null;
@@ -101,6 +104,7 @@ public class Main {
         }
     }
 
+
     // 标记已处理（避免重复插入）
     private static void markProcessed(Connection connection, String link) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
@@ -119,25 +123,15 @@ public class Main {
         }
     }
 
-    private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, link);
+
+
+    private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException{
+        try (PreparedStatement statement = connection.prepareStatement(sql)){
+            statement.setString(1,link);
             statement.executeUpdate();
         }
     }
 
-    // ✅ 补回你之前用到的工具方法：从数据库读一列结果到 List<String>
-    // 保留原签名，避免 “cannot find symbol loadUrlFromDatabase(...)”
-    private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
-        List<String> result = new ArrayList<>();
-        try (PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet rs = statement.executeQuery()) {
-            while (rs.next()) {
-                result.add(rs.getString(1));
-            }
-        }
-        return result;
-    }
 
     public static void main(String[] args) throws IOException, SQLException {
 
@@ -149,48 +143,51 @@ public class Main {
 
         try (Connection connection = DriverManager.getConnection(jdbcUrl, "root", "")) {
 
+            String link = null;
+
             // 确保表存在 & 初始数据
             initSchema(connection);
             seedIfEmpty(connection);
 
-            while (true) {
-                // 从数据库取一个待处理链接
-                String link = popOneLink(connection);
+            // String url = "jdbc:h2:file:/Users/aliran/news";
+            // Connection connection = DriverManager.getConnection(url);
 
-                if (link == null) {
-                    System.out.println("done");
-                    break;
-                }
+            // 从new一个待处理的链接池变成从数据库加载待处理的链接的代码👉因为数据库能实现数据的持久化
+            List<String> linkPool = loadUrlFromDatabase(connection, "select link from LINKS_TO_BE_PROCESSED");
+            // 从new一个已处理的链接池变成从数据库加载已经处理的链接的代码
+            Set<String> processedLinks = new HashSet<>(loadUrlFromDatabase(connection, "select link from LINKS_ALREADY_PROCESSED"));
 
-                // 如果已经处理过就跳过
-                if (alreadyProcessed(connection, link)) {
+            if (linkPool.isEmpty()) {
+                linkPool.add(HOMEPAGE_HTTP);
+            } // 先把新浪首页压进去
+
+
+            while (!linkPool.isEmpty()) {
+                // 这里变成每次处理完链接后要更新数据库
+                String link = linkPool.remove(linkPool.size() - 1);
+                if (processedLinks.contains(link)) {
                     continue;
                 }
 
                 if (shouldSkipLink(link)) {
-                    markProcessed(connection, link);
+                    processedLinks.add(link);
                     continue;
                 }
 
                 Document doc = fetchDocument(link, isCI);
-                if (doc == null) {
+                if (doc == null) { // ✅ 检查 doc
                     System.err.println("Document is null for link: " + link);
-                    markProcessed(connection, link);
+                    processedLinks.add(link);
                     continue;
                 }
 
                 parseAndPrintTitles(doc);
-
-                // 标记当前链接已处理
-                markProcessed(connection, link);
-
-                // 假设在这里解析到新链接并入队（示例）
-                // for (String newUrl : findNewLinks(doc)) {
-                //     enqueue(connection, newUrl);
-                // }
+                processedLinks.add(link);
             }
         }
     }
+
+
 
     private static boolean shouldSkipLink(String link) {
         if (!link.contains("sina.cn")) {
@@ -204,6 +201,7 @@ public class Main {
         }
         return false;
     }
+
 
     private static Document fetchDocument(String link, boolean isCI) throws IOException {
         if (isCI) {
@@ -234,6 +232,7 @@ public class Main {
         }
     }
 
+
     private static void parseAndPrintTitles(Document doc) {
         Elements articleTags = doc.select("article");
         for (Element articleTag : articleTags) {
@@ -241,13 +240,13 @@ public class Main {
                 System.out.println(articleTag.child(0).text());
             }
         }
-    }
 
-    private static boolean isNewsPage(String link) {
+    }
+    private static boolean isNewsPage(String link){
         return link.contains("new.sina.cn");
     }
 
-    private static boolean isLoginPage(String link) {
+    private static boolean isLoginPage(String link){
         return link.contains("password.sina.cn");
     }
 
@@ -255,3 +254,4 @@ public class Main {
         return link.equals(HOMEPAGE_HTTP) || link.equals(HOMEPAGE_HTTPS);
     }
 }
+
