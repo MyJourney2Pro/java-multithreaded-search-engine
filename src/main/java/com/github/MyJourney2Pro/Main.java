@@ -44,8 +44,16 @@ public class Main {
             stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (LINK VARCHAR(1024) PRIMARY KEY)");
             stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (LINK VARCHAR(1024) PRIMARY KEY)");
             // ↓↓↓ 新增：把旧库里可能是 VARCHAR(100) 的列扩到 2048
-            try { stmt.execute("ALTER TABLE LINKS_TO_BE_PROCESSED ALTER COLUMN LINK VARCHAR(2048)"); } catch (SQLException ignore) {}
-            try { stmt.execute("ALTER TABLE LINKS_ALREADY_PROCESSED ALTER COLUMN LINK VARCHAR(2048)"); } catch (SQLException ignore) {}
+            try {
+                stmt.execute("ALTER TABLE LINKS_TO_BE_PROCESSED ALTER COLUMN LINK VARCHAR(2048)");
+            } catch (SQLException ignore) {
+
+            }
+            try {
+                stmt.execute("ALTER TABLE LINKS_ALREADY_PROCESSED ALTER COLUMN LINK VARCHAR(2048)");
+            } catch (SQLException ignore) {
+
+            }
         }
     }
 
@@ -66,7 +74,9 @@ public class Main {
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT LINK FROM LINKS_TO_BE_PROCESSED LIMIT 1");
              ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) link = rs.getString(1);
+            if (rs.next()) {
+                link = rs.getString(1);
+            }
         }
         if (link != null) {
             try (PreparedStatement del = connection.prepareStatement(
@@ -131,7 +141,9 @@ public class Main {
 
                 // FIX: 不再使用未定义的 linkPool；每次从数据库“弹出”一个
                 String link = popOneLink(connection);
-                if (link == null) break;
+                if (link == null) {
+                    break;
+                }
 
                 if (shouldSkipLink(link)) {
                     markProcessed(connection, link);
@@ -142,56 +154,6 @@ public class Main {
                 }
 
 
-
-/*
-            while (!linkPool.isEmpty()) {
-                // 从new一个待处理的链接池变成从数据库加载待处理的链接的代码👉因为数据库能实现数据的持久化
-                List<String> linkPool = loadUrlFromDatabase(connection, "select link from LINKS_TO_BE_PROCESSED");
-                // 从new一个已处理的链接池变成从数据库加载已经处理的链接的代码
-                Set<String> processedLinks = new HashSet<>(loadUrlFromDatabase(connection, "select link from LINKS_ALREADY_PROCESSED"));
-
-                if (linkPool.isEmpty()) {
-                    linkPool.add(HOMEPAGE_HTTP);
-                } // 先把新浪首页压进去
-
-
-                // 这里变成每次处理完链接后要更新数据库
-                String link = linkPool.remove(linkPool.size() - 1);
-
-                // 从待处理池中捞一个来处理, 处理完就从池子里(包括内存和数据库)删除
-                try(PreparedStatement statement = connection.prepareStatement("DELETE FROM LINKS_TO_BE_PROCESSED where link = ?");
-                    statement.setString(1,link);
-                    statement.executeUpdate();
-                    }
-
-
-
-                // 询问数据库当前链接是不是已经被处理过了？
-                boolean processed = false;
-                try(PreparedStatement statement = connection.prepareStatement("SELECT LINK from LINKS_ALREADY_PROCESSED where link = ?");
-                    statement.setString(1,link);
-                    ResultSet resultSet = statement.executeQuery();
-                    while (resultSet.next()) {
-                    processed = true;
-                }
-                    if (processed){
-                        continue;
-
-                if(processedLinks.contains(link)) {
-                    continue;
-                }
-
-                if (shouldSkipLink(link)) {
-                    processedLinks.add(link);
-                    continue;
-                }
-
-            try(PreparedStatement statement = connection.prepareStatement("INSERT INTO LINKS_ALREADY_PROCESSED(link) values(?));
-                statement.setString(1,link);
-                statement.executeUpdate();
-                    }
-
- */
                 Document doc = fetchDocument(link, isCI);
                 if (doc == null) { // ✅ 检查 doc
                     System.err.println("Document is null for link: " + link);
@@ -262,7 +224,9 @@ public class Main {
         Elements articleTags = doc.select("article h1, article h2, h1, h2");
         int count = 0;
         for (Element h : articleTags) {
-            if (count++ >= 10) break;
+            if (count++ >= 10) {
+                break;
+            }
             System.out.println("  - " + h.text());
         }
 
