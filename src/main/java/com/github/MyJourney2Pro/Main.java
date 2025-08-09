@@ -19,44 +19,46 @@ import static org.apache.http.impl.client.HttpClients.createDefault;
 
 public class Main {
 
-
     private static final String HOMEPAGE_HTTP  = "http://sina.cn";
     private static final String HOMEPAGE_HTTPS = "https://sina.cn";
     private static final String UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
-
-    private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
-        List<String> result = new ArrayList<>();
+    // ✅ 修复：该方法用途是取“一个”链接，所以返回类型改为 String
+    private static String getNextLink(Connection connection, String sql) throws SQLException {
+        ResultSet resultSet = null;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            ResultSet resultSet = statement.executeQuery();
-            while (resultSet.next()) {
-                result.add(resultSet.getString(1));
+            resultSet = statement.executeQuery();
+            if (resultSet.next()) {
+                return resultSet.getString(1);
+            }
+        } finally {
+            if (resultSet != null) {
+                resultSet.close();
             }
         }
-        return result;
+        return null;
     }
 
+    private static String getNextLinkThenDelete(Connection connection) throws SQLException {
+        String link = getNextLink(connection, "select link from LINKS_TO_BE_PROCESSED LIMIT 1");
+        if (link != null) {
+            UpdateDatabase(connection, link, "DELETE FROM LINKS_TO_BE_PROCESSED WHERE LINK = ?");
+        }
+        return link;
+    }
 
     // 初始化数据库结构（如果不存在）
     private static void initSchema(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (LINK VARCHAR(1024) PRIMARY KEY)");
-            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (LINK VARCHAR(1024) PRIMARY KEY)");
-            // ↓↓↓ 新增：把旧库里可能是 VARCHAR(100) 的列扩到 2048
-            try {
-                stmt.execute("ALTER TABLE LINKS_TO_BE_PROCESSED ALTER COLUMN LINK VARCHAR(2048)");
-            } catch (SQLException ignore) {
-
-            }
-            try {
-                stmt.execute("ALTER TABLE LINKS_ALREADY_PROCESSED ALTER COLUMN LINK VARCHAR(2048)");
-            } catch (SQLException ignore) {
-
-            }
+            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_TO_BE_PROCESSED (" +
+                    "LINK VARCHAR(1024) PRIMARY KEY" +
+                    ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS LINKS_ALREADY_PROCESSED (" +
+                    "LINK VARCHAR(1024) PRIMARY KEY" +
+                    ")");
         }
     }
-
 
     private static void seedIfEmpty(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement();
@@ -67,7 +69,6 @@ public class Main {
             }
         }
     }
-
 
     private static String popOneLink(Connection connection) throws SQLException {
         String link = null;
@@ -99,7 +100,6 @@ public class Main {
         }
     }
 
-
     // 标记已处理（避免重复插入）
     private static void markProcessed(Connection connection, String link) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
@@ -118,9 +118,25 @@ public class Main {
         }
     }
 
+    private static void UpdateDatabase(Connection connection, String link, String sql) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, link);
+            statement.executeUpdate();
+        }
+    }
 
-
-
+    // ✅ 补回你之前用到的工具方法：从数据库读一列结果到 List<String>
+    // 保留原签名，避免 “cannot find symbol loadUrlFromDatabase(...)”
+    private static List<String> loadUrlFromDatabase(Connection connection, String sql) throws SQLException {
+        List<String> result = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                result.add(rs.getString(1));
+            }
+        }
+        return result;
+    }
 
     public static void main(String[] args) throws IOException, SQLException {
 
@@ -136,39 +152,39 @@ public class Main {
             initSchema(connection);
             seedIfEmpty(connection);
 
-            int maxPages = 30; // 防止失控
-            for (int i = 0; i < maxPages; i++) {
-
-                // FIX: 不再使用未定义的 linkPool；每次从数据库“弹出”一个
+            while (true) {
+                // 从数据库取一个待处理链接
                 String link = popOneLink(connection);
+
                 if (link == null) {
+                    System.out.println("done");
                     break;
+                }
+
+                // 如果已经处理过就跳过
+                if (alreadyProcessed(connection, link)) {
+                    continue;
                 }
 
                 if (shouldSkipLink(link)) {
                     markProcessed(connection, link);
                     continue;
                 }
-                if (alreadyProcessed(connection, link)) {
-                    continue;
-                }
-
 
                 Document doc = fetchDocument(link, isCI);
-                if (doc == null) { // ✅ 检查 doc
+                if (doc == null) {
                     System.err.println("Document is null for link: " + link);
                     markProcessed(connection, link);
                     continue;
                 }
 
-                // 打印并把页面中的链接写回待处理表
-                parseAndPrintTitles(doc, connection);
+                parseAndPrintTitles(doc);
 
-                // 标记已处理
+                // 标记当前链接已处理
                 markProcessed(connection, link);
+
             }
         }
-        System.out.println("Done.");
     }
 
 
@@ -184,7 +200,6 @@ public class Main {
         }
         return false;
     }
-
 
     private static Document fetchDocument(String link, boolean isCI) throws IOException {
         if (isCI) {
@@ -206,8 +221,7 @@ public class Main {
                 try (CloseableHttpResponse resp = httpclient.execute(httpGet)) {
                     HttpEntity entity = resp.getEntity();
                     String html = EntityUtils.toString(entity);
-                    // 传 baseUri，后面 absUrl 才能解析相对链接
-                    return Jsoup.parse(html, link);
+                    return Jsoup.parse(html);
                 }
             } catch (IOException e) {
                 System.err.println("访问失败: " + link);
@@ -216,34 +230,20 @@ public class Main {
         }
     }
 
-
-    // 传入 Connection；打印标题；把 a[href] 的绝对链接入库
-    private static void parseAndPrintTitles(Document doc, Connection connection) throws SQLException {
-        System.out.println("[PAGE] " + doc.title());
-
-        Elements articleTags = doc.select("article h1, article h2, h1, h2");
-        int count = 0;
-        for (Element h : articleTags) {
-            if (count++ >= 10) {
-                break;
-            }
-            System.out.println("  - " + h.text());
-        }
-
-        // 把页面中的链接加入待处理（限定域）
-        for (Element a : doc.select("a[href]")) {
-            String next = a.absUrl("href");
-            if (!shouldSkipLink(next)) {
-                enqueue(connection, next);
+    private static void parseAndPrintTitles(Document doc) {
+        Elements articleTags = doc.select("article");
+        for (Element articleTag : articleTags) {
+            if (!articleTag.children().isEmpty()) {
+                System.out.println(articleTag.child(0).text());
             }
         }
     }
 
-    private static boolean isNewsPage(String link){
-        return link.contains("new.sina.cn") || link.contains("news.sina.cn");
+    private static boolean isNewsPage(String link) {
+        return link.contains("new.sina.cn");
     }
 
-    private static boolean isLoginPage(String link){
+    private static boolean isLoginPage(String link) {
         return link.contains("password.sina.cn");
     }
 
@@ -251,4 +251,3 @@ public class Main {
         return link.equals(HOMEPAGE_HTTP) || link.equals(HOMEPAGE_HTTPS);
     }
 }
-

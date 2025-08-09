@@ -113,6 +113,15 @@
                 </configuration>
             </plugin>
 
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>10.0.0</version>
+                <configuration>
+                    <url>jdbc:h2:file:/Users/aliran/news</url>
+                    <user>root</user>
+                </configuration>
+            </plugin>
 
 
             <plugin>
@@ -120,7 +129,6 @@
                 <artifactId>spotbugs-maven-plugin</artifactId>
                 <version>4.9.3.2</version>
                 <dependencies>
-                    <!-- overwrite dependency on spotbugs if you want to specify the version of spotbugs -->
                     <dependency>
                         <groupId>com.github.spotbugs</groupId>
                         <artifactId>spotbugs</artifactId>
